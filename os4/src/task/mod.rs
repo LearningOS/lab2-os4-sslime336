@@ -14,8 +14,12 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use core::convert::TryInto;
+
+use crate::config::{MAX_SYSCALL_NUM, CLOCK_FREQ};
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_us;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -79,6 +83,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
+        next_task.started_time = get_time_us();
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -134,6 +139,9 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.tasks[next].started_time == 0 {
+                inner.tasks[next].started_time = get_time_us();
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -190,4 +198,39 @@ pub fn current_user_token() -> usize {
 /// Get the current 'Running' task's trap contexts.
 pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
+}
+
+/// Get the current 'Running' task's status
+pub fn current_task_status() -> TaskStatus {
+    // let inner = TASK_MANAGER.inner.exclusive_access();
+    // let cur_id = inner.current_task;
+
+    // inner.tasks[cur_id].task_status
+
+    TaskStatus::Running
+}
+
+
+/// Get the current task syscall_times
+pub fn current_task_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_id = inner.current_task;
+
+    inner.tasks[cur_id].syscall_times
+}
+
+/// Get the current task lived time
+pub fn current_task_time() -> usize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_id = inner.current_task;
+
+    let cur_timestamp = get_time_us();
+
+    (cur_timestamp - inner.tasks[cur_id].started_time) / 1000
+}
+
+pub fn inc_current_task_syscall_num(syscall_id: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_id = inner.current_task;
+    inner.tasks[cur_id].syscall_times[syscall_id] += 1;
 }

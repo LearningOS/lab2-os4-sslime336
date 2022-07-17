@@ -1,7 +1,7 @@
 //! Process management syscalls
 
 use crate::config::MAX_SYSCALL_NUM;
-use crate::task::{exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token};
+use crate::task::{exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token, current_task_status, current_task_time, current_task_syscall_times};
 use crate::timer::get_time_us;
 use crate::mm::get_phy_addr_from;
 
@@ -41,7 +41,7 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
             usec: us % 1_000_000,
         };
     }
-    
+
     0
 }
 
@@ -61,5 +61,14 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
 
 // YOUR JOB: 引入虚地址后重写 sys_task_info
 pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
-    -1
+    let ti = get_phy_addr_from(current_user_token(), (ti as usize).into()) as *mut TaskInfo;
+    unsafe {
+        *ti = TaskInfo {
+            status: current_task_status(),
+            syscall_times: current_task_syscall_times(),
+            time: current_task_time(),
+        }
+    }
+    
+    0
 }
