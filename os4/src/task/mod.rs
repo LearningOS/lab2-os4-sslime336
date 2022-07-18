@@ -174,7 +174,10 @@ impl TaskManager {
 
         // 检查是否已被占用
         if vpn_range.into_iter().find(|&vpn|{
-            current_task.memory_set.translate(vpn).is_some()
+            match current_task.memory_set.translate(vpn) {
+                Some(pte) => pte.is_valid(),
+                None => false,
+            }
         }).is_some() { return -1 }
 
         // 建立映射
@@ -189,7 +192,7 @@ impl TaskManager {
         if start % PAGE_SIZE != 0 {
             return -1;
         }
-
+        
         let start_vpn: VirtPageNum = VirtAddr(start).into();
         let end_vpn: VirtPageNum = VirtAddr(start + len).ceil();
         let vpn_range = VPNRange::new(start_vpn, end_vpn);
@@ -201,20 +204,22 @@ impl TaskManager {
 
         // 是否存在未占用，同时需要检查最后一级页表项
         if vpn_range.into_iter().find(|&vpn| {
-            if let Some(pte) = current_task.memory_set.translate(vpn) {
-                !pte.is_valid() // 占用且合法
-            } else { true } // 存在未占用或者占用但不合法
+            match current_task.memory_set.translate(vpn) {
+                Some(pte) => !pte.is_valid(), // 已占用但不合法
+                None => true, // 未占用
+            }
         }).is_some() { return -1 }
 
         // 释放
         vpn_range.into_iter().for_each(|vpn|{
             current_task.memory_set.munmap(vpn)
         });
-            // for vpn in vpn_range {
-            //     if current_task.memory_set.is_allcalled(vpn) {
-            //         current_task.memory_set.areas.remove(i);
-            //     }
-            // }
+
+        if vpn_range.into_iter().find(|&vpn| {
+            if let Some(pte) = current_task.memory_set.translate(vpn) {
+                pte.is_valid() 
+            } else { false }
+        }).is_some() { return -1 }
 
         0
     }
