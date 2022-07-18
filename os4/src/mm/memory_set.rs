@@ -34,10 +34,28 @@ lazy_static! {
 /// memory set structure, controls virtual-memory space
 pub struct MemorySet {
     page_table: PageTable,
-    areas: Vec<MapArea>,
+    pub areas: Vec<MapArea>,
 }
 
 impl MemorySet {
+    pub fn is_allcalled(&self, vpn: VirtPageNum) -> bool {
+        for area in &self.areas {
+            if area.has_been_allocated(vpn) {
+                return true;
+            } 
+        }
+
+        false
+    }
+
+    pub fn munmap(&mut self, vpn: VirtPageNum) {
+        // self.areas.iter().enumerate().into_iter().for_each(|(idx, map_area)| {
+        //     if !self.is_allcalled(vpn) {
+        //         self.areas.remove(idx);
+        //     }
+        // })
+    }
+
     pub fn new_bare() -> Self {
         Self {
             page_table: PageTable::new(),
@@ -301,6 +319,9 @@ impl MapArea {
             }
             current_vpn.step();
         }
+    }
+    pub fn has_been_allocated(&self, vpn: VirtPageNum) -> bool {
+        self.data_frames.get(&vpn).is_some()
     }
 }
 

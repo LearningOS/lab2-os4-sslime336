@@ -16,8 +16,9 @@ mod task;
 
 use core::convert::TryInto;
 
-use crate::config::{MAX_SYSCALL_NUM, CLOCK_FREQ};
+use crate::config::{MAX_SYSCALL_NUM, CLOCK_FREQ, PAGE_SIZE_BITS, PAGE_SIZE};
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{VirtAddr, VirtPageNum, VPNRange, MapPermission, PageTable};
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_us;
 use crate::trap::TrapContext;
@@ -155,6 +156,76 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    fn mmap(&self, start: usize, len: usize, port: usize) -> isize {
+        // start 没有按页对齐   port & !0x7 != 0 (port 其余位必须为0)   port & 0x7 = 0 (这样的内存无意义)
+        if start % PAGE_SIZE != 0 || port & !0x7 != 0 || port & 0x7 == 0 {
+            return -1;
+        }
+        let permission = MapPermission::from_bits((port as u8) << 1).unwrap() | MapPermission::U ;
+        let start_vpn: VirtPageNum = VirtAddr(start).into();
+        let end_vpn: VirtPageNum = VirtAddr(start + len).ceil();
+        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+
+        // get current task
+        let mut inner = self.inner.exclusive_access();
+        let cur_id = inner.current_task;
+        let current_task = &mut inner.tasks[cur_id];
+
+        // 检查是否已被占用
+        if vpn_range.into_iter().find(|&vpn|{
+            current_task.memory_set.translate(vpn).is_some()
+        }).is_some() { return -1 }
+
+        // 建立映射
+        current_task.memory_set
+            .insert_framed_area(start_vpn.into(), end_vpn.into(), permission);
+        
+        0
+    }
+
+    fn munmap(&self, start: usize, len: usize) -> isize {
+        // start 没有按页对齐  
+        if start % PAGE_SIZE != 0 {
+            return -1;
+        }
+
+        let start_vpn: VirtPageNum = VirtAddr(start).into();
+        let end_vpn: VirtPageNum = VirtAddr(start + len).ceil();
+        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+
+        // get current task
+        let mut inner = self.inner.exclusive_access();
+        let cur_id = inner.current_task;
+        let current_task = &mut inner.tasks[cur_id];
+
+        // 是否存在未占用，同时需要检查最后一级页表项
+        if vpn_range.into_iter().find(|&vpn| {
+            if let Some(pte) = current_task.memory_set.translate(vpn) {
+                !pte.is_valid() // 占用且合法
+            } else { true } // 存在未占用或者占用但不合法
+        }).is_some() { return -1 }
+
+        // 释放
+        vpn_range.into_iter().for_each(|vpn|{
+            current_task.memory_set.munmap(vpn)
+        });
+            // for vpn in vpn_range {
+            //     if current_task.memory_set.is_allcalled(vpn) {
+            //         current_task.memory_set.areas.remove(i);
+            //     }
+            // }
+
+        0
+    }
+}
+
+pub fn task_mmap(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.mmap(start, len, port)
+}
+
+pub fn task_munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.munmap(start, len)
 }
 
 /// Run the first task in task list.
